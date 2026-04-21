@@ -1,238 +1,321 @@
 #include <FastLED.h>
 
-// ---------------------- Configuration ----------------------
-#define LED_TYPE     WS2812B
-#define COLOR_ORDER  GRB
+// ======================================================
+// CONFIG
+// ======================================================
+#define NUM_STRIPS 6
+#define LEDS_PER_STRIP 9
 
-static const uint8_t NUM_LEFT_STRIPS  = 3;
-static const uint8_t NUM_RIGHT_STRIPS = 3;
-static const uint8_t MAX_LEN = 9; // max of your 9/8/6
+#define RIGHT_PIN_1 2
+#define RIGHT_PIN_2 4
+#define RIGHT_PIN_3 6
 
-static const uint8_t leftPins[NUM_LEFT_STRIPS]    = {2, 3, 4};
-static const uint8_t rightPins[NUM_RIGHT_STRIPS]  = {5, 6, 7};
+#define LEFT_PIN_1 3
+#define LEFT_PIN_2 5
+#define LEFT_PIN_3 7
 
-static const uint8_t leftLen[NUM_LEFT_STRIPS]     = {9, 8, 6};
-static const uint8_t rightLen[NUM_RIGHT_STRIPS]   = {9, 8, 6};
+#define BRAKE_PIN 8
+#define LEFT_INPUT 9
+#define RIGHT_INPUT 10
 
-static const uint8_t PIN_BRAKE = 8;
-static const uint8_t PIN_LEFT  = 9;
-static const uint8_t PIN_RIGHT = 10;
+CRGB leds[NUM_STRIPS][LEDS_PER_STRIP];
 
-static const uint8_t RUNNING_LEVEL = 128; // 50%
-static const uint8_t BRAKE_LEVEL   = 255;
-static const uint8_t TURN_LEVEL    = 255;
-
-static const uint16_t DEBOUNCE_MS         = 10;
-static const uint16_t DEFAULT_TURN_ON_MS  = 450;
-static const uint16_t MIN_STEP_MS         = 15;
-static const uint16_t MAX_STEP_MS         = 250;
-
-// Tail/Brake/Turn color
-static const CRGB BASE_COLOR = CRGB(255, 0, 0);
-// -----------------------------------------------------------
-
-CRGB leftLeds[NUM_LEFT_STRIPS][MAX_LEN];
-CRGB rightLeds[NUM_RIGHT_STRIPS][MAX_LEN];
-
-struct DebouncedInput {
-  uint8_t pin;
-  bool stableState = false;
-  bool lastRaw = false;
-  uint32_t lastChangeMs = 0;
-
-  void begin(uint8_t p) {
-    pin = p;
-    pinMode(pin, INPUT); // use INPUT_PULLUP if needed (then invert read)
-    lastRaw = digitalRead(pin);
-    stableState = lastRaw;
-    lastChangeMs = millis();
-  }
-
-  bool update() {
-    bool raw = digitalRead(pin);
-    uint32_t now = millis();
-    if (raw != lastRaw) {
-      lastRaw = raw;
-      lastChangeMs = now;
-    }
-    if ((now - lastChangeMs) >= DEBOUNCE_MS) stableState = lastRaw;
-    return stableState;
-  }
+// ======================================================
+// MODE SYSTEM (SINGLE SOURCE OF TRUTH)
+// ======================================================
+enum Mode {
+  IDLE,
+  LEFT,
+  RIGHT,
+  HAZARD,
+  BRAKE
 };
 
-DebouncedInput inBrake, inLeft, inRight;
+Mode mode;
 
-struct TurnAnimator {
-  bool lastState = false;
-  uint32_t lastEdgeMs = 0;
+// ======================================================
+// SIGNAL FILTERING
+// ======================================================
+const unsigned long debounceTime = 40;
 
-  uint16_t lastOnMs  = DEFAULT_TURN_ON_MS;
-  uint16_t lastOffMs = DEFAULT_TURN_ON_MS;
+bool rawLeftPrev = false;
+bool rawRightPrev = false;
 
-  uint8_t maxLen = 9;
-  uint8_t fillCount = 0;
-  uint32_t nextStepMs = 0;
-  uint16_t stepIntervalMs = 50;
+bool stableLeft = false;
+bool stableRight = false;
 
-  void begin(uint8_t maxStripLen) {
-    maxLen = maxStripLen;
-    lastState = false;
-    lastEdgeMs = millis();
-    fillCount = 0;
-    nextStepMs = millis();
-    computeStepInterval();
+unsigned long leftChangeTime = 0;
+unsigned long rightChangeTime = 0;
+
+// ======================================================
+// EDGE + LATCH
+// ======================================================
+bool leftLatched = false;
+bool rightLatched = false;
+
+bool leftPrevClean = false;
+bool rightPrevClean = false;
+
+// ======================================================
+// ANIMATION
+// ======================================================
+int headPos = 0;
+unsigned long lastStep = 0;
+
+// ======================================================
+// STARTUP
+// ======================================================
+bool startupDone = false;
+int startupStep = 0;
+unsigned long startupTimer = 0;
+
+// ======================================================
+// HELPERS
+// ======================================================
+int rev(int i) {
+  return (LEDS_PER_STRIP - 1) - i;
+}
+
+// ======================================================
+// INPUT FILTER
+// ======================================================
+void filterInputs(bool rawLeft, bool rawRight,
+                  bool &leftOut, bool &rightOut) {
+
+  unsigned long now = millis();
+
+  if (rawLeft != rawLeftPrev) {
+    rawLeftPrev = rawLeft;
+    leftChangeTime = now;
   }
 
-  void computeStepInterval() {
-    uint16_t interval = (uint16_t)(lastOnMs / (maxLen ? maxLen : 1));
-    interval = constrain(interval, MIN_STEP_MS, MAX_STEP_MS);
-    stepIntervalMs = interval;
+  if ((now - leftChangeTime) > debounceTime) {
+    stableLeft = rawLeft;
   }
 
-  void updateRhythm(bool currentState) {
-    uint32_t now = millis();
-    if (currentState != lastState) {
-      uint32_t dt = now - lastEdgeMs;
-      lastEdgeMs = now;
+  if (rawRight != rawRightPrev) {
+    rawRightPrev = rawRight;
+    rightChangeTime = now;
+  }
 
-      if (lastState == true && currentState == false) {
-        // ON ended
-        if (dt >= 20 && dt <= 3000) lastOnMs = (uint16_t)dt;
-        computeStepInterval();
-      } else if (lastState == false && currentState == true) {
-        // OFF ended (ON started)
-        if (dt >= 20 && dt <= 3000) lastOffMs = (uint16_t)dt;
-        fillCount = 0;
-        nextStepMs = now;
-      }
-      lastState = currentState;
+  if ((now - rightChangeTime) > debounceTime) {
+    stableRight = rawRight;
+  }
+
+  leftOut = stableLeft;
+  rightOut = stableRight;
+}
+
+// ======================================================
+// EDGE DETECTION (ONE SHOT LATCH)
+// ======================================================
+void detectEdges(bool left, bool right) {
+
+  if (left && !leftPrevClean) {
+    leftLatched = true;
+    headPos = 0;
+  }
+
+  if (!left) leftLatched = false;
+
+  if (right && !rightPrevClean) {
+    rightLatched = true;
+    headPos = 0;
+  }
+
+  if (!right) rightLatched = false;
+
+  leftPrevClean = left;
+  rightPrevClean = right;
+}
+
+// ======================================================
+// STARTUP SEQUENCE
+// ======================================================
+void startupSequence() {
+
+  if (millis() - startupTimer > 25) {
+    startupTimer = millis();
+    startupStep++;
+
+    if (startupStep > LEDS_PER_STRIP) {
+      startupDone = true;
+      return;
     }
   }
 
-  void updateAnimation(bool signalOn) {
-    uint32_t now = millis();
-    if (!signalOn) { fillCount = 0; return; }
-
-    if ((int32_t)(now - nextStepMs) >= 0) {
-      if (fillCount < maxLen) fillCount++;
-      else fillCount = 1; // repeat if ON stays long
-      nextStepMs = now + stepIntervalMs;
+  for (int s = 0; s < NUM_STRIPS; s++) {
+    for (int i = 0; i < startupStep; i++) {
+      leds[s][rev(i)] = CRGB(80, 0, 0);
     }
   }
-};
 
-TurnAnimator leftAnim, rightAnim;
-
-static inline CRGB scaledColor(uint8_t level) {
-  CRGB c = BASE_COLOR;
-  c.nscale8_video(level);
-  return c;
+  FastLED.show();
 }
 
-void clearAll() {
-  for (uint8_t s = 0; s < NUM_LEFT_STRIPS; s++)  fill_solid(leftLeds[s],  MAX_LEN, CRGB::Black);
-  for (uint8_t s = 0; s < NUM_RIGHT_STRIPS; s++) fill_solid(rightLeds[s], MAX_LEN, CRGB::Black);
-}
+// ======================================================
+// RUNNING LIGHTS (MODE-AWARE)
+// ======================================================
+void runningLights(Mode mode) {
 
-void setSideSolid(CRGB side[][MAX_LEN], const uint8_t *lens, uint8_t nStrips, uint8_t level) {
-  CRGB c = scaledColor(level);
-  for (uint8_t s = 0; s < nStrips; s++) {
-    for (uint8_t i = 0; i < lens[s]; i++) side[s][i] = c;
+  // 🚨 HARD BLOCK IN HAZARD
+  if (mode == HAZARD) return;
+
+  bool leftActive = (mode == LEFT);
+  bool rightActive = (mode == RIGHT);
+
+  if (!rightActive) {
+    for (int s = 0; s < 3; s++)
+      for (int i = 0; i < 3; i++)
+        leds[s][i] = CRGB(40, 0, 0);
+  }
+
+  if (!leftActive) {
+    for (int s = 3; s < 6; s++)
+      for (int i = 0; i < 3; i++)
+        leds[s][i] = CRGB(40, 0, 0);
   }
 }
 
-// Outside running lights = last 3 indices (because inside is index 0)
-void setSideRunningOutside3(CRGB side[][MAX_LEN], const uint8_t *lens, uint8_t nStrips, uint8_t level) {
-  CRGB c = scaledColor(level);
-  for (uint8_t s = 0; s < nStrips; s++) {
-    uint8_t L = lens[s];
-    uint8_t start = (L > 3) ? (L - 3) : 0;
-    for (uint8_t i = start; i < L; i++) side[s][i] = c;
+// ======================================================
+// AUDI COMET ANIMATION
+// ======================================================
+void audiComet(int startStrip, int endStrip, unsigned long period) {
+
+  unsigned long stepTime = period / LEDS_PER_STRIP;
+
+  if (millis() - lastStep > stepTime) {
+    lastStep = millis();
+
+    headPos++;
+
+    if (headPos >= LEDS_PER_STRIP) {
+      headPos = 0;
+    }
+  }
+
+  for (int s = startStrip; s <= endStrip; s++) {
+    for (int i = 0; i < LEDS_PER_STRIP; i++) {
+
+      int r = rev(i);
+      int dist = headPos - i;
+
+      if (dist == 0) leds[s][r] = CRGB::Red;
+      else if (dist == 1) leds[s][r] = CRGB(120, 0, 0);
+      else if (dist == 2) leds[s][r] = CRGB(40, 0, 0);
+    }
   }
 }
 
-// Turn fill from inside (0) outward
-void setSideTurnFill(CRGB side[][MAX_LEN], const uint8_t *lens, uint8_t nStrips, uint8_t fillCount, uint8_t level) {
-  CRGB c = scaledColor(level);
-  for (uint8_t s = 0; s < nStrips; s++) {
-    uint8_t L = lens[s];
-    uint8_t count = (fillCount > L) ? L : fillCount;
-    for (uint8_t i = 0; i < L; i++) side[s][i] = (i < count) ? c : CRGB::Black;
-  }
+// ======================================================
+// BRAKE
+// ======================================================
+void brakeLayer() {
+  for (int s = 0; s < NUM_STRIPS; s++)
+    for (int i = 0; i < LEDS_PER_STRIP; i++)
+      leds[s][i] = CRGB::Red;
 }
 
+// ======================================================
+// SETUP
+// ======================================================
 void setup() {
-  // Add each strip controller (each pin is separate)
-  FastLED.addLeds<LED_TYPE, 2, COLOR_ORDER>(leftLeds[0], MAX_LEN);
-  FastLED.addLeds<LED_TYPE, 3, COLOR_ORDER>(leftLeds[1], MAX_LEN);
-  FastLED.addLeds<LED_TYPE, 4, COLOR_ORDER>(leftLeds[2], MAX_LEN);
 
-  FastLED.addLeds<LED_TYPE, 5, COLOR_ORDER>(rightLeds[0], MAX_LEN);
-  FastLED.addLeds<LED_TYPE, 6, COLOR_ORDER>(rightLeds[1], MAX_LEN);
-  FastLED.addLeds<LED_TYPE, 7, COLOR_ORDER>(rightLeds[2], MAX_LEN);
+  FastLED.addLeds<WS2812B, RIGHT_PIN_1, GRB>(leds[0], LEDS_PER_STRIP);
+  FastLED.addLeds<WS2812B, RIGHT_PIN_2, GRB>(leds[1], LEDS_PER_STRIP);
+  FastLED.addLeds<WS2812B, RIGHT_PIN_3, GRB>(leds[2], LEDS_PER_STRIP);
 
-  inBrake.begin(PIN_BRAKE);
-  inLeft.begin(PIN_LEFT);
-  inRight.begin(PIN_RIGHT);
-
-  uint8_t maxLeft = 0, maxRight = 0;
-  for (uint8_t i = 0; i < NUM_LEFT_STRIPS; i++)  maxLeft  = max(maxLeft,  leftLen[i]);
-  for (uint8_t i = 0; i < NUM_RIGHT_STRIPS; i++) maxRight = max(maxRight, rightLen[i]);
-
-  leftAnim.begin(maxLeft);
-  rightAnim.begin(maxRight);
-
-  FastLED.clear(true);
+  FastLED.addLeds<WS2812B, LEFT_PIN_1, GRB>(leds[3], LEDS_PER_STRIP);
+  FastLED.addLeds<WS2812B, LEFT_PIN_2, GRB>(leds[4], LEDS_PER_STRIP);
+  FastLED.addLeds<WS2812B, LEFT_PIN_3, GRB>(leds[5], LEDS_PER_STRIP);
 }
 
+// ======================================================
+// LOOP (SINGLE-RENDER BCM ARCHITECTURE)
+// ======================================================
 void loop() {
-  bool brake = inBrake.update();
-  bool left  = inLeft.update();
-  bool right = inRight.update();
 
-  leftAnim.updateRhythm(left);
-  rightAnim.updateRhythm(right);
-  leftAnim.updateAnimation(left);
-  rightAnim.updateAnimation(right);
+  bool rawLeft = digitalRead(LEFT_INPUT);
+  bool rawRight = digitalRead(RIGHT_INPUT);
+  bool brake = digitalRead(BRAKE_PIN);
 
-  bool hazard = left && right;
+  bool left, right;
 
-  clearAll();
+  // STEP 1: FILTER INPUTS
+  filterInputs(rawLeft, rawRight, left, right);
 
-  if (brake && !left && !right) {
-    // Brake only
-    setSideSolid(leftLeds, leftLen, NUM_LEFT_STRIPS, BRAKE_LEVEL);
-    setSideSolid(rightLeds, rightLen, NUM_RIGHT_STRIPS, BRAKE_LEVEL);
+  // STEP 2: EDGE DETECTION
+  detectEdges(left, right);
+
+  // STEP 3: CLEAR FRAME
+  for (int s = 0; s < NUM_STRIPS; s++)
+    for (int i = 0; i < LEDS_PER_STRIP; i++)
+      leds[s][i] = CRGB::Black;
+
+  // ======================================================
+  // STARTUP OVERRIDE
+  // ======================================================
+  if (!startupDone) {
+    startupSequence();
+    return;
   }
-  else if (hazard) {
-    // Hazard: animate both sides
-    setSideTurnFill(leftLeds, leftLen, NUM_LEFT_STRIPS, leftAnim.fillCount, TURN_LEVEL);
-    setSideTurnFill(rightLeds, rightLen, NUM_RIGHT_STRIPS, rightAnim.fillCount, TURN_LEVEL);
+
+  // ======================================================
+  // MODE ARBITRATION (SINGLE AUTHORITY)
+  // ======================================================
+  if (brake && !leftLatched && !rightLatched) {
+    mode = BRAKE;
   }
-  else if (brake && (left || right)) {
-    // Brake + turn: other side solid
-    if (left) {
-      setSideTurnFill(leftLeds, leftLen, NUM_LEFT_STRIPS, leftAnim.fillCount, TURN_LEVEL);
-      setSideSolid(rightLeds, rightLen, NUM_RIGHT_STRIPS, BRAKE_LEVEL);
-    } else {
-      setSideSolid(leftLeds, leftLen, NUM_LEFT_STRIPS, BRAKE_LEVEL);
-      setSideTurnFill(rightLeds, rightLen, NUM_RIGHT_STRIPS, rightAnim.fillCount, TURN_LEVEL);
-    }
+  else if (leftLatched && rightLatched) {
+    mode = HAZARD;
   }
-  else if (!brake && (left || right)) {
-    // Turn only: other side running outside-3
-    if (left) {
-      setSideTurnFill(leftLeds, leftLen, NUM_LEFT_STRIPS, leftAnim.fillCount, TURN_LEVEL);
-      setSideRunningOutside3(rightLeds, rightLen, NUM_RIGHT_STRIPS, RUNNING_LEVEL);
-    } else {
-      setSideRunningOutside3(leftLeds, leftLen, NUM_LEFT_STRIPS, RUNNING_LEVEL);
-      setSideTurnFill(rightLeds, rightLen, NUM_RIGHT_STRIPS, rightAnim.fillCount, TURN_LEVEL);
-    }
+  else if (leftLatched) {
+    mode = LEFT;
+  }
+  else if (rightLatched) {
+    mode = RIGHT;
   }
   else {
-    // Rest
-    setSideRunningOutside3(leftLeds, leftLen, NUM_LEFT_STRIPS, RUNNING_LEVEL);
-    setSideRunningOutside3(rightLeds, rightLen, NUM_RIGHT_STRIPS, RUNNING_LEVEL);
+    mode = IDLE;
+  }
+
+  // ======================================================
+  // RENDER ENGINE (NO LAYER CONFLICTS)
+  // ======================================================
+  switch (mode) {
+
+    case HAZARD:
+      audiComet(0, 5, 600);
+      if (brake) brakeLayer();
+      break;
+
+    case LEFT:
+      audiComet(3, 5, 600);
+      runningLights(LEFT);
+      if (brake) {
+        for (int s = 0; s < 3; s++)
+          for (int i = 0; i < LEDS_PER_STRIP; i++)
+            leds[s][i] = CRGB::Red;
+      }
+      break;
+
+    case RIGHT:
+      audiComet(0, 2, 600);
+      runningLights(RIGHT);
+      if (brake) {
+        for (int s = 3; s < 6; s++)
+          for (int i = 0; i < LEDS_PER_STRIP; i++)
+            leds[s][i] = CRGB::Red;
+      }
+      break;
+
+    case BRAKE:
+      brakeLayer();
+      break;
+
+    case IDLE:
+      runningLights(IDLE);
+      break;
   }
 
   FastLED.show();
