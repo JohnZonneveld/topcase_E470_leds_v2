@@ -1,322 +1,186 @@
 #include <FastLED.h>
 
-// ======================================================
-// CONFIG
-// ======================================================
-#define NUM_STRIPS 6
-#define LEDS_PER_STRIP 9
+// =========================
+// LED CONFIG
+// =========================
+#define LED_TYPE WS2812B
+#define COLOR_ORDER GRB
 
-#define RIGHT_PIN_1 2
-#define RIGHT_PIN_2 4
-#define RIGHT_PIN_3 6
+// Pins (Right side)
+#define PIN_R9 2
+#define PIN_R8 4
+#define PIN_R6 6
 
-#define LEFT_PIN_1 3
-#define LEFT_PIN_2 5
-#define LEFT_PIN_3 7
+// Pins (Left side)
+#define PIN_L9 3
+#define PIN_L8 5
+#define PIN_L6 7
 
+// Inputs
 #define BRAKE_PIN 8
-#define LEFT_INPUT 9
-#define RIGHT_INPUT 10
+#define RIGHT_PIN 9
+#define LEFT_PIN 10
 
-CRGB leds[NUM_STRIPS][LEDS_PER_STRIP];
+#define LEN9 9
+#define LEN8 8
+#define LEN6 6
 
-// ======================================================
-// MODE SYSTEM (SINGLE SOURCE OF TRUTH)
-// ======================================================
-enum Mode {
-  IDLE,
-  LEFT,
-  RIGHT,
-  HAZARD,
-  BRAKE
-};
+// =========================
+// STRIPS
+// =========================
+CRGB r9[LEN9], r8[LEN8], r6[LEN6];
+CRGB l9[LEN9], l8[LEN8], l6[LEN6];
 
-Mode mode;
+// =========================
+// ROW OFFSETS (physical alignment fix)
+// =========================
+int offTop = -3;
+int offMid = -2;
+int offBot =  0;
 
-// ======================================================
-// SIGNAL FILTERING
-// ======================================================
-const unsigned long debounceTime = 40;
+// =========================
+// FONT 3x5
+// =========================
+struct Ch { byte r[3]; };
 
-bool rawLeftPrev = false;
-bool rawRightPrev = false;
-
-bool stableLeft = false;
-bool stableRight = false;
-
-unsigned long leftChangeTime = 0;
-unsigned long rightChangeTime = 0;
-
-// ======================================================
-// EDGE + LATCH
-// ======================================================
-bool leftLatched = false;
-bool rightLatched = false;
-
-bool leftPrevClean = false;
-bool rightPrevClean = false;
-
-// ======================================================
-// ANIMATION
-// ======================================================
-int headPos = 0;
-unsigned long lastStep = 0;
-
-// ======================================================
-// STARTUP
-// ======================================================
-bool startupDone = false;
-int startupStep = 0;
-unsigned long startupTimer = 0;
-
-// ======================================================
-// HELPERS
-// ======================================================
-int rev(int i) {
-  return (LEDS_PER_STRIP - 1) - i;
+Ch font(char c){
+  switch(c){
+    case 'F': return {{0b111,0b100,0b100}};
+    case 'A': return {{0b010,0b111,0b101}};
+    case 'T': return {{0b111,0b010,0b010}};
+    case 'N': return {{0b101,0b111,0b101}};
+    case 'I': return {{0b010,0b010,0b010}};
+    case 'J': return {{0b001,0b001,0b111}};
+    case ' ': return {{0,0,0}};
+  }
+  return {{0,0,0}};
 }
 
-// ======================================================
-// INPUT FILTER
-// ======================================================
-void filterInputs(bool rawLeft, bool rawRight,
-                  bool &leftOut, bool &rightOut) {
+// =========================
+// PIXEL DRAW (NO RIGHT SHIFT COMPENSATION)
+// =========================
+void drawPixel(int x,int y,CRGB c){
 
-  unsigned long now = millis();
-
-  if (rawLeft != rawLeftPrev) {
-    rawLeftPrev = rawLeft;
-    leftChangeTime = now;
-  }
-
-  if ((now - leftChangeTime) > debounceTime) {
-    stableLeft = rawLeft;
-  }
-
-  if (rawRight != rawRightPrev) {
-    rawRightPrev = rawRight;
-    rightChangeTime = now;
-  }
-
-  if ((now - rightChangeTime) > debounceTime) {
-    stableRight = rawRight;
-  }
-
-  leftOut = stableLeft;
-  rightOut = stableRight;
-}
-
-// ======================================================
-// EDGE DETECTION (ONE SHOT LATCH)
-// ======================================================
-void detectEdges(bool left, bool right) {
-
-  if (left && !leftPrevClean) {
-    leftLatched = true;
-    headPos = 0;
-  }
-
-  if (!left) leftLatched = false;
-
-  if (right && !rightPrevClean) {
-    rightLatched = true;
-    headPos = 0;
-  }
-
-  if (!right) rightLatched = false;
-
-  leftPrevClean = left;
-  rightPrevClean = right;
-}
-
-// ======================================================
-// STARTUP SEQUENCE
-// ======================================================
-void startupSequence() {
-
-  if (millis() - startupTimer > 25) {
-    startupTimer = millis();
-    startupStep++;
-
-    if (startupStep > LEDS_PER_STRIP) {
-      startupDone = true;
-      return;
+  // TOP ROW
+  if(y==0){
+    int i = x + 3;
+    if(i>=0 && i<LEN9){
+      r9[i]=c;
+      l9[i]=c;
     }
   }
 
-  for (int s = 0; s < NUM_STRIPS; s++) {
-    for (int i = 0; i < startupStep; i++) {
-      leds[s][rev(i)] = CRGB(80, 0, 0);
+  // MIDDLE ROW
+  if(y==1){
+    int i = x + 2;
+    if(i>=0 && i<LEN8){
+      r8[i]=c;
+      l8[i]=c;
     }
   }
 
-  FastLED.show();
-}
-
-// ======================================================
-// RUNNING LIGHTS (MODE-AWARE)
-// ======================================================
-void runningLights(Mode mode) {
-
-  // 🚨 HARD BLOCK IN HAZARD
-  if (mode == HAZARD) return;
-
-  bool leftActive = (mode == LEFT);
-  bool rightActive = (mode == RIGHT);
-
-  if (!rightActive) {
-    for (int s = 0; s < 3; s++)
-      for (int i = 0; i < 3; i++)
-        leds[s][i] = CRGB(40, 0, 0);
-  }
-
-  if (!leftActive) {
-    for (int s = 3; s < 6; s++)
-      for (int i = 0; i < 3; i++)
-        leds[s][i] = CRGB(40, 0, 0);
-  }
-}
-
-// ======================================================
-// AUDI COMET ANIMATION
-// ======================================================
-void audiComet(int startStrip, int endStrip, unsigned long period) {
-
-  unsigned long stepTime = period / LEDS_PER_STRIP;
-
-  if (millis() - lastStep > stepTime) {
-    lastStep = millis();
-
-    headPos++;
-
-    if (headPos >= LEDS_PER_STRIP) {
-      headPos = 0;
-    }
-  }
-
-  for (int s = startStrip; s <= endStrip; s++) {
-    for (int i = 0; i < LEDS_PER_STRIP; i++) {
-
-      int r = rev(i);
-      int dist = headPos - i;
-
-      if (dist == 0) leds[s][r] = CRGB::Red;
-      else if (dist == 1) leds[s][r] = CRGB(120, 0, 0);
-      else if (dist == 2) leds[s][r] = CRGB(40, 0, 0);
+  // BOTTOM ROW
+  if(y==2){
+    int i = x;
+    if(i>=0 && i<LEN6){
+      r6[i]=c;
+      l6[i]=c;
     }
   }
 }
 
-// ======================================================
-// BRAKE
-// ======================================================
-void brakeLayer() {
-  for (int s = 0; s < NUM_STRIPS; s++)
-    for (int i = 0; i < LEDS_PER_STRIP; i++)
-      leds[s][i] = CRGB::Red;
+// =========================
+// CLEAR
+// =========================
+void clearAll(){
+  fill_solid(r9,9,CRGB::Black);
+  fill_solid(r8,8,CRGB::Black);
+  fill_solid(r6,6,CRGB::Black);
+  fill_solid(l9,9,CRGB::Black);
+  fill_solid(l8,8,CRGB::Black);
+  fill_solid(l6,6,CRGB::Black);
 }
 
-// ======================================================
+// =========================
+// DRAW CHAR
+// =========================
+void drawChar(char c,int x0){
+  Ch ch = font(c);
+
+  for(int col=0; col<3; col++){
+    int x = x0 + col;
+
+    for(int row=0; row<3; row++){
+      if(ch.r[row] & (1 << (2-col))){
+        drawPixel(x,row,CRGB(180,0,0));
+      }
+    }
+  }
+}
+
+// =========================
+// STARTUP ANIMATION (SCANLINE)
+// =========================
+void startupAnim(){
+
+  const char* msg = " FAT NINJA ";
+  int len = strlen(msg);
+
+  // REVERSED SCROLL DIRECTION
+  for(int offset = 10; offset > -len*4; offset--){
+
+    clearAll();
+
+    for(int i=0;i<len;i++){
+      drawChar(msg[i], offset + i*4);
+    }
+
+    FastLED.show();
+    delay(65);
+  }
+
+  // ignition flash
+  for(int i=0;i<2;i++){
+    fill_solid(r9,9,CRGB(255,0,0));
+    fill_solid(r8,8,CRGB(255,0,0));
+    fill_solid(r6,6,CRGB(255,0,0));
+    fill_solid(l9,9,CRGB(255,0,0));
+    fill_solid(l8,8,CRGB(255,0,0));
+    fill_solid(l6,6,CRGB(255,0,0));
+
+    FastLED.show();
+    delay(120);
+
+    clearAll();
+    FastLED.show();
+    delay(120);
+  }
+}
+// =========================
 // SETUP
-// ======================================================
-void setup() {
+// =========================
+void setup(){
+  pinMode(BRAKE_PIN,INPUT);
+  pinMode(LEFT_PIN,INPUT);
+  pinMode(RIGHT_PIN,INPUT);
 
-  FastLED.addLeds<WS2812B, RIGHT_PIN_1, GRB>(leds[0], LEDS_PER_STRIP);
-  FastLED.addLeds<WS2812B, RIGHT_PIN_2, GRB>(leds[1], LEDS_PER_STRIP);
-  FastLED.addLeds<WS2812B, RIGHT_PIN_3, GRB>(leds[2], LEDS_PER_STRIP);
+  FastLED.addLeds<WS2812B,PIN_R9,GRB>(r9,9);
+  FastLED.addLeds<WS2812B,PIN_R8,GRB>(r8,8);
+  FastLED.addLeds<WS2812B,PIN_R6,GRB>(r6,6);
 
-  FastLED.addLeds<WS2812B, LEFT_PIN_1, GRB>(leds[3], LEDS_PER_STRIP);
-  FastLED.addLeds<WS2812B, LEFT_PIN_2, GRB>(leds[4], LEDS_PER_STRIP);
-  FastLED.addLeds<WS2812B, LEFT_PIN_3, GRB>(leds[5], LEDS_PER_STRIP);
+  FastLED.addLeds<WS2812B,PIN_L9,GRB>(l9,9);
+  FastLED.addLeds<WS2812B,PIN_L8,GRB>(l8,8);
+  FastLED.addLeds<WS2812B,PIN_L6,GRB>(l6,6);
+
+  FastLED.clear();
+  FastLED.show();
+
+  startupAnim();
 }
 
-// ======================================================
-// LOOP (SINGLE-RENDER BCM ARCHITECTURE)
-// ======================================================
-void loop() {
-
-  bool rawLeft = digitalRead(LEFT_INPUT);
-  bool rawRight = digitalRead(RIGHT_INPUT);
-  bool brake = digitalRead(BRAKE_PIN);
-
-  bool left, right;
-
-  // STEP 1: FILTER INPUTS
-  filterInputs(rawLeft, rawRight, left, right);
-
-  // STEP 2: EDGE DETECTION
-  detectEdges(left, right);
-
-  // STEP 3: CLEAR FRAME
-  for (int s = 0; s < NUM_STRIPS; s++)
-    for (int i = 0; i < LEDS_PER_STRIP; i++)
-      leds[s][i] = CRGB::Black;
-
-  // ======================================================
-  // STARTUP OVERRIDE
-  // ======================================================
-  if (!startupDone) {
-    startupSequence();
-    return;
-  }
-
-  // ======================================================
-  // MODE ARBITRATION (SINGLE AUTHORITY)
-  // ======================================================
-  if (brake && !leftLatched && !rightLatched) {
-    mode = BRAKE;
-  }
-  else if (leftLatched && rightLatched) {
-    mode = HAZARD;
-  }
-  else if (leftLatched) {
-    mode = LEFT;
-  }
-  else if (rightLatched) {
-    mode = RIGHT;
-  }
-  else {
-    mode = IDLE;
-  }
-
-  // ======================================================
-  // RENDER ENGINE (NO LAYER CONFLICTS)
-  // ======================================================
-  switch (mode) {
-
-    case HAZARD:
-      audiComet(0, 5, 600);
-      if (brake) brakeLayer();
-      break;
-
-    case LEFT:
-      audiComet(3, 5, 600);
-      runningLights(LEFT);
-      if (brake) {
-        for (int s = 0; s < 3; s++)
-          for (int i = 0; i < LEDS_PER_STRIP; i++)
-            leds[s][i] = CRGB::Red;
-      }
-      break;
-
-    case RIGHT:
-      audiComet(0, 2, 600);
-      runningLights(RIGHT);
-      if (brake) {
-        for (int s = 3; s < 6; s++)
-          for (int i = 0; i < LEDS_PER_STRIP; i++)
-            leds[s][i] = CRGB::Red;
-      }
-      break;
-
-    case BRAKE:
-      brakeLayer();
-      break;
-
-    case IDLE:
-      runningLights(IDLE);
-      break;
-  }
-
-  FastLED.show();
+// =========================
+// LOOP (EMPTY BASE)
+// =========================
+void loop(){
+  // placeholder for brake / turn logic
 }
