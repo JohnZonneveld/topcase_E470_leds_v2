@@ -206,26 +206,49 @@ void turn(bool leftSide,uint8_t step){
 }
 
 // =========================
-// STARTUP ANIMATION (FIXED SCANLINE)
+// STARTUP ANIMATION (PERFECT CENTER ALIGNMENT FOR OUTSIDE-IN)
 // =========================
 void startupAnim(){
-
   const char* msg = " FAT NINJA ";
   int len = strlen(msg);
 
-  for(int scan=20; scan > -len*4; scan--){
-
+  // Global canvas width spans from 0 (far left) to 17 (far right)
+  for(int scan = 20; scan > -len * 4; scan--){
     clearAll();
 
-    for(int i=0;i<len;i++){
+    for(int i = 0; i < len; i++){
       Ch c = font(msg[i]);
 
-      for(int col=0; col<3; col++){
-        int x = scan + i*4 + col;
+      for(int col = 0; col < 3; col++){
+        int x = scan + i * 4 + col;
 
-        for(int row=0; row<3; row++){
-          if(c.r[row] & (1 << (2-col))){
-            drawPixel(x,row,CRGB(180,0,0));
+        for(int row = 0; row < 3; row++){
+          if(c.r[row] & (1 << (2 - col))){
+            
+            if (x >= 9) {
+              // --- RIGHT SIDE CENTER-ALIGNED MIRROR ---
+              // targetX tracks from 0 (center line) to 8 (outside edge)
+              int targetX = x - 9; 
+              
+              if(row == 0){ // Top (9 LED)
+                // Reversing the offset direction accounts for the flipped hardware
+                int idx = targetX + offTop; 
+                if(idx >= 0 && idx < LEN9) r9[idx] = CRGB(180,0,0);
+              }
+              else if(row == 1){ // Mid (8 LED)
+                int idx = targetX + offMid;
+                if(idx >= 0 && idx < LEN8) r8[idx] = CRGB(180,0,0);
+              }
+              else if(row == 2){ // Bot (6 LED)
+                int idx = targetX + offBot;
+                if(idx >= 0 && idx < LEN6) r6[idx] = CRGB(180,0,0);
+              }
+            } 
+            else {
+              // --- LEFT SIDE STAYS 100% UNTOUCHED ---
+              drawPixel(x, row, CRGB(180, 0, 0));
+            }
+            
           }
         }
       }
@@ -235,21 +258,14 @@ void startupAnim(){
     delay(60);
   }
 
-  // ignition flash
+  // Ignition flashes...
   for(int i=0;i<2;i++){
-    fill_solid(r9,LEN9,CRGB(255,0,0));
-    fill_solid(r8,LEN8,CRGB(255,0,0));
-    fill_solid(r6,LEN6,CRGB(255,0,0));
-    fill_solid(l9,LEN9,CRGB(255,0,0));
-    fill_solid(l8,LEN8,CRGB(255,0,0));
-    fill_solid(l6,LEN6,CRGB(255,0,0));
-
-    FastLED.show();
-    delay(120);
-
-    clearAll();
-    FastLED.show();
-    delay(120);
+    fill_solid(ledsL, SIDE_TOTAL, COLOR_BRAKE);
+    fill_solid(ledsR, SIDE_TOTAL, COLOR_BRAKE);
+    FastLED.show(); delay(120);
+    fill_solid(ledsL, SIDE_TOTAL, CRGB::Black);
+    fill_solid(ledsR, SIDE_TOTAL, CRGB::Black);
+    FastLED.show(); delay(120);
   }
 }
 
@@ -268,26 +284,45 @@ void loop(){
 
   unsigned long now=millis();
 
-  if(L&&!prevL){
-    leftCycle=now-leftRise;
-    leftRise=now;
-    leftStep=0;
-    leftHold=now+leftCycle;
+  // Left Signal Edge Detection & Dynamic Sync
+  if(L && !prevL){
+    if (leftRise != 0) { 
+      unsigned long calc = now - leftRise;
+      // Sanity check: normal motorcycle flashers run between 50Hz and 120Hz 
+      // (approx 500ms to 1200ms per full cycle)
+      if (calc > 400 && calc < 1200) {
+        leftCycle = calc; 
+      }
+    }
+    leftRise = now;
+    leftStep = 0;
+    
+    // Set hold time to 1.3x the actual measured cycle.
+    // This guarantees it covers the "off" phase, but times out quickly when canceled.
+    leftHold = now + ((leftCycle * 13) / 10); 
   }
 
-  if(R&&!prevR){
-    rightCycle=now-rightRise;
-    rightRise=now;
-    rightStep=0;
-    rightHold=now+rightCycle;
+  // Right Signal Edge Detection & Dynamic Sync
+  if(R && !prevR){
+    if (rightRise != 0) {
+      unsigned long calc = now - rightRise;
+      if (calc > 400 && calc < 1200) {
+        rightCycle = calc;
+      }
+    }
+    rightRise = now;
+    rightStep = 0;
+    rightHold = now + ((rightCycle * 13) / 10);
   }
 
-  prevL=L;
-  prevR=R;
+  prevL = L;
+  prevR = R;
 
-  bool La=L||now<leftHold;
-  bool Ra=R||now<rightHold;
-  bool haz=La&&Ra;
+  // Active check: Stay in turn mode if the physical pin is HIGH, 
+  // OR if we are currently riding out the dark gap calculated above.
+  bool La = L || (now < leftHold);
+  bool Ra = R || (now < rightHold);
+  bool haz = La && Ra;
 
   if(now-lastAnim > max(20UL,min(leftCycle,rightCycle)/10)){
     lastAnim=now;
