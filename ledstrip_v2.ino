@@ -112,13 +112,26 @@ void drawPixel(int x,int y,CRGB c){
   }
 }
 
-// =========================
-// INPUT
-// =========================
-void upd(Inp &i){
-  bool r=digitalRead(i.pin);
-  if(r!=i.last){i.t=millis();i.last=r;}
-  if(millis()-i.t>debounceMs)i.state=r;
+// =========================================================================
+// GENERIC INPUT DEBOUNCER (HANDLES MECHANIAL VIBRATION / SWITCH BOUNCE)
+// =========================================================================
+void updateInput(Inp &input) {
+  // Read the raw electrical state of the physical pin
+  bool rawReading = (digitalRead(input.pin) == HIGH);
+
+  // If the physical pin changed state, reset the debounce timer
+  if (rawReading != input.last) {
+    input.t = millis();
+  }
+
+  // If the reading has been stable for longer than the debounce window
+  if ((millis() - input.t) > debounceMs) {
+    // Lock in the new verified state
+    input.state = rawReading;
+  }
+
+  // Save the raw reading for the next processor loop comparison
+  input.last = rawReading;
 }
 
 // =========================
@@ -137,10 +150,10 @@ void setup(){
   FastLED.addLeds<LED_TYPE,PIN_L8,COLOR_ORDER>(l8,LEN8);
   FastLED.addLeds<LED_TYPE,PIN_L6,COLOR_ORDER>(l6,LEN6);
 
-  FastLED.clear();
-  FastLED.show();
-
   startupAnim();
+
+  clearAll();
+  FastLED.show();
 }
 
 // =========================
@@ -186,10 +199,19 @@ void brakeLight(bool left){
   }
 }
 
-void comet(CRGB* s,int len,int pos){
-  for(int i=0;i<4;i++){
-    int p=len-1-pos+i;
-    if(p>=0&&p<len) s[p]=CRGB(200/(i+1),0,0);
+void comet(CRGB* s, int len, int pos){
+  // i = 0 is the leading head, i = 1, 2, 3 are the trailing dim pixels
+  for(int i = 0; i < 4; i++){
+    
+    // Core Math: Starts at the center line (len - 1) and counts outward as pos increases.
+    // Adding '+ i' ensures the dim tail pixels trail behind toward the center line.
+    int p = len - 1 - pos + i;
+    
+    // Strict boundary safety check
+    if(p >= 0 && p < len) {
+      // Vivid automotive amber
+      s[p] = CRGB(200 / (i + 1), 0 , 0); 
+    }
   }
 }
 
@@ -205,14 +227,48 @@ void turn(bool leftSide,uint8_t step){
   }
 }
 
-// =========================
-// STARTUP ANIMATION (PERFECT CENTER ALIGNMENT FOR OUTSIDE-IN)
-// =========================
+// A 3x18 lookup table stored safely in Flash memory (PROGMEM)
+const int8_t PROGMEM layoutMap[3][18] = {
+  //  0   1   2   3   4   5   6   7   8  |  9  10  11  12  13  14  15  16  17   <- Virtual X
+  {   0,  1,  2,  3,  4,  5,  6,  7,  8,    8,  7,  6,  5,  4,  3,  2,  1,  0 }, // Row 0 (Top)
+  {  -1,  0,  1,  2,  3,  4,  5,  6,  7,    7,  6,  5,  4,  3,  2,  1,  0, -1 }, // Row 1 (Mid)
+  {  -1, -1, -1,  0,  1,  2,  3,  4,  5,    5,  4,  3,  2,  1,  0, -1, -1, -1 }  // Row 2 (Bot)
+};
+
+// =========================================================================
+// UNIFIED GRAPHICS MAPPING ENGINE (MANAGES HARDWARE LAYOUT)
+// =========================================================================
+void setMatrixPixel(int x, int row, CRGB color) {
+  // 1. Safety boundary check
+  if (x < 0 || x > 17 || row < 0 || row > 2) return;
+
+  // 2. Read the physical index from the flash memory table
+  int8_t physicalIdx = pgm_read_byte(&(layoutMap[row][x]));
+
+  // 3. If it's a phantom/empty slot (-1), discard it immediately!
+  if (physicalIdx == -1) return;
+
+  // 4. Send the color to the correct strip array based on left/right hemisphere
+  if (x <= 8) {
+    if (row == 0)      l9[physicalIdx] = color;
+    else if (row == 1) l8[physicalIdx] = color;
+    else if (row == 2) l6[physicalIdx] = color;
+  } 
+  else {
+    if (row == 0)      r9[physicalIdx] = color;
+    else if (row == 1) r8[physicalIdx] = color;
+    else if (row == 2) r6[physicalIdx] = color;
+  }
+}
+
+// =========================================================================
+// STARTUP ANIMATION (FLAWLESS UNIFIED HORIZONTAL MARXCH)
+// =========================================================================
 void startupAnim(){
   const char* msg = " FAT NINJA ";
   int len = strlen(msg);
 
-  // Global canvas width spans from 0 (far left) to 17 (far right)
+  // Smooth right-to-left marquee scan across the full 18-column virtual grid
   for(int scan = 20; scan > -len * 4; scan--){
     clearAll();
 
@@ -223,32 +279,10 @@ void startupAnim(){
         int x = scan + i * 4 + col;
 
         for(int row = 0; row < 3; row++){
+          // Read font columns naturally from left to right
           if(c.r[row] & (1 << (2 - col))){
-            
-            if (x >= 9) {
-              // --- RIGHT SIDE CENTER-ALIGNED MIRROR ---
-              // targetX tracks from 0 (center line) to 8 (outside edge)
-              int targetX = x - 9; 
-              
-              if(row == 0){ // Top (9 LED)
-                // Reversing the offset direction accounts for the flipped hardware
-                int idx = targetX + offTop; 
-                if(idx >= 0 && idx < LEN9) r9[idx] = CRGB(180,0,0);
-              }
-              else if(row == 1){ // Mid (8 LED)
-                int idx = targetX + offMid;
-                if(idx >= 0 && idx < LEN8) r8[idx] = CRGB(180,0,0);
-              }
-              else if(row == 2){ // Bot (6 LED)
-                int idx = targetX + offBot;
-                if(idx >= 0 && idx < LEN6) r6[idx] = CRGB(180,0,0);
-              }
-            } 
-            else {
-              // --- LEFT SIDE STAYS 100% UNTOUCHED ---
-              drawPixel(x, row, CRGB(180, 0, 0));
-            }
-            
+            // Pass coordinates straight to our mapping engine
+            setMatrixPixel(x, row, CRGB(180, 0, 0));
           }
         }
       }
@@ -258,14 +292,20 @@ void startupAnim(){
     delay(60);
   }
 
-  // Ignition flashes...
-  for(int i=0;i<2;i++){
-    fill_solid(ledsL, SIDE_TOTAL, COLOR_BRAKE);
-    fill_solid(ledsR, SIDE_TOTAL, COLOR_BRAKE);
-    FastLED.show(); delay(120);
-    fill_solid(ledsL, SIDE_TOTAL, CRGB::Black);
-    fill_solid(ledsR, SIDE_TOTAL, CRGB::Black);
-    FastLED.show(); delay(120);
+  // Ignition flashes rewritten to use the discrete hardware strips
+  for(int i = 0; i < 2; i++){
+    fill_solid(r9, LEN9, CRGB(255,0,0));
+    fill_solid(r8, LEN8, CRGB(255,0,0));
+    fill_solid(r6, LEN6, CRGB(255,0,0));
+    fill_solid(l9, LEN9, CRGB(255,0,0));
+    fill_solid(l8, LEN8, CRGB(255,0,0));
+    fill_solid(l6, LEN6, CRGB(255,0,0));
+    FastLED.show(); 
+    delay(120);
+    
+    clearAll();
+    FastLED.show(); 
+    delay(120);
   }
 }
 
@@ -274,9 +314,9 @@ void startupAnim(){
 // =========================
 void loop(){
 
-  upd(brake);
-  upd(leftI);
-  upd(rightI);
+  updateInput(brake);
+  updateInput(leftI);
+  updateInput(rightI);
 
   bool b=brake.state;
   bool L=leftI.state;
