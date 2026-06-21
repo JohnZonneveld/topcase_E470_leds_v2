@@ -318,14 +318,15 @@ void loop(){
   updateInput(leftI);
   updateInput(rightI);
 
-  bool b=brake.state;
-  bool L=leftI.state;
-  bool R=rightI.state;
+  bool isBraking=brake.state;
+  // bool isHazard = isLeftActive && isRightActive
+  bool isLeftOn = leftI.state; // && !isHazard;
+  bool isRightOn = rightI.state; // && !isHazard;
 
   unsigned long now=millis();
 
   // Left Signal Edge Detection & Dynamic Sync
-  if(L && !prevL){
+  if(isLeftOn && !prevL){
     if (leftRise != 0) { 
       unsigned long calc = now - leftRise;
       // Sanity check: normal motorcycle flashers run between 50Hz and 120Hz 
@@ -343,7 +344,7 @@ void loop(){
   }
 
   // Right Signal Edge Detection & Dynamic Sync
-  if(R && !prevR){
+  if(isRightOn && !prevR){
     if (rightRise != 0) {
       unsigned long calc = now - rightRise;
       if (calc > 400 && calc < 1200) {
@@ -355,49 +356,49 @@ void loop(){
     rightHold = now + ((rightCycle * 13) / 10);
   }
 
-  prevL = L;
-  prevR = R;
+  prevL = isLeftOn;
+  prevR = isRightOn;
 
   // Active check: Stay in turn mode if the physical pin is HIGH, 
   // OR if we are currently riding out the dark gap calculated above.
-  bool La = L || (now < leftHold);
-  bool Ra = R || (now < rightHold);
-  bool haz = La && Ra;
+  bool isLeftActive = isLeftOn || (now < leftHold);
+  bool isRightActive = isRightOn || (now < rightHold);
+  bool isHazard = isLeftActive && isRightActive;
 
   if(now-lastAnim > max(20UL,min(leftCycle,rightCycle)/10)){
     lastAnim=now;
-    if(La) leftStep++;
-    if(Ra) rightStep++;
+    if(isLeftActive) leftStep++;
+    if(isRightActive) rightStep++;
   }
 
   clearAll();
 
   // RUNNING
-  if(!b){
-    if(!haz){
-      if(!La) runLight(true);
-      if(!Ra) runLight(false);
+  if(!isBraking){
+    if(!isHazard){
+      if(!isLeftActive) runLight(true);
+      if(!isRightActive) runLight(false);
     }
   }
 
   // BRAKE
-  if(b){
-    if(haz){
+  if(isBraking){
+    if(isHazard){
       brakeLight(true);
       brakeLight(false);
     } else {
-      if(!La) brakeLight(true);
-      if(!Ra) brakeLight(false);
+      if(!isLeftActive) brakeLight(true);
+      if(!isRightActive) brakeLight(false);
     }
   }
 
   // TURN
-  if(haz){
+  if(isHazard){
     turn(true,leftStep);
     turn(false,rightStep);
   } else {
-    if(La) turn(true,leftStep);
-    if(Ra) turn(false,rightStep);
+    if(isLeftActive) turn(true,leftStep);
+    if(isRightActive) turn(false,rightStep);
   }
 
   FastLED.show();
