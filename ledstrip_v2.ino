@@ -365,25 +365,75 @@ void loop(){
     }
   }
 
-  // BRAKE
-  if(isBraking){
-    if(isHazard){
-      brakeLight(true);
-      brakeLight(false);
+  // -------------------------------------------------------------------------
+  // LEFT SIDE TAILLIGHT
+  // -------------------------------------------------------------------------
+  if (isHazard || isLeftActive) {
+    // 1. Establish the background layer first
+    if (isBraking) {
+      fill_solid(l9, LEN9, CRGB(255, 0, 0));
+      fill_solid(l8, LEN8, CRGB(255, 0, 0));
+      fill_solid(l6, LEN6, CRGB(255, 0, 0));
     } else {
-      if(!isLeftActive) brakeLight(true);
-      if(!isRightActive) brakeLight(false);
+      fill_solid(l9, LEN9, CRGB(60, 0, 0));
+      fill_solid(l8, LEN8, CRGB(60, 0, 0));
+      fill_solid(l6, LEN6, CRGB(60, 0, 0));
     }
+    
+    // 2. Layer the inside-out comet right on top
+    // (If hazards are on, use leftStep or rightStep depending on how your sync matches)
+    uint8_t step = leftStep; 
+    comet(l9, LEN9, step);
+    comet(l8, LEN8, step);
+    comet(l6, LEN6, step);
+  } 
+  else if (isBraking) {
+    // No left signals active, but brake is held down
+    fill_solid(l9, LEN9, CRGB(255, 0, 0));
+    fill_solid(l8, LEN8, CRGB(255, 0, 0));
+    fill_solid(l6, LEN6, CRGB(255, 0, 0));
+  } 
+  else {
+    // Default left running lights
+    fill_solid(l9, LEN9, CRGB(60, 0, 0));
+    fill_solid(l8, LEN8, CRGB(60, 0, 0));
+    fill_solid(l6, LEN6, CRGB(60, 0, 0));
   }
 
-  // TURN
-  if(isHazard){
-    turn(true,leftStep);
-    turn(false,rightStep);
-  } else {
-    if(isLeftActive) turn(true,leftStep);
-    if(isRightActive) turn(false,rightStep);
+  // -------------------------------------------------------------------------
+  // RIGHT SIDE TAILLIGHT
+  // -------------------------------------------------------------------------
+  if (isHazard || isRightActive) {
+    // 1. Establish the background layer first
+    if (isBraking) {
+      fill_solid(r9, LEN9, CRGB(255, 0, 0));
+      fill_solid(r8, LEN8, CRGB(255, 0, 0));
+      fill_solid(r6, LEN6, CRGB(255, 0, 0));
+    } else {
+      fill_solid(r9, LEN9, CRGB(60, 0, 0));
+      fill_solid(r8, LEN8, CRGB(60, 0, 0));
+      fill_solid(r6, LEN6, CRGB(60, 0, 0));
+    }
+    
+    // 2. Layer the inside-out comet right on top
+    uint8_t step = rightStep;
+    comet(r9, LEN9, step);
+    comet(r8, LEN8, step);
+    comet(r6, LEN6, step);
+  } 
+  else if (isBraking) {
+    // No right signals active, but brake is held down
+    fill_solid(r9, LEN9, CRGB(255, 0, 0));
+    fill_solid(r8, LEN8, CRGB(255, 0, 0));
+    fill_solid(r6, LEN6, CRGB(255, 0, 0));
+  } 
+  else {
+    // Default right running lights
+    fill_solid(r9, LEN9, CRGB(60, 0, 0));
+    fill_solid(r8, LEN8, CRGB(60, 0, 0));
+    fill_solid(r6, LEN6, CRGB(60, 0, 0));
   }
 
+  // Final step: Push the cleanly blended pixels to the topcase hardware
   FastLED.show();
 }
