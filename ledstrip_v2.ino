@@ -6,12 +6,12 @@
 #define LED_TYPE WS2812B
 #define COLOR_ORDER GRB
 
-// Right side
+// Right side strips
 #define PIN_R9 2
 #define PIN_R8 4
 #define PIN_R6 6
 
-// Left side
+// Left side strips
 #define PIN_L9 3
 #define PIN_L8 5
 #define PIN_L6 7
@@ -26,14 +26,14 @@
 #define LEN6 6
 
 // =========================
-// BRIGHTNESS
+// BRIGHTNESS DEFINITION
 // =========================
 uint8_t RUN_BRIGHT   = 120;
 uint8_t BRAKE_BRIGHT = 200;
 uint8_t TURN_BRIGHT  = 200;
 
 // =========================
-// STRIPS
+// STRIPS DEFINITION
 // =========================
 CRGB r9[LEN9], r8[LEN8], r6[LEN6];
 CRGB l9[LEN9], l8[LEN8], l6[LEN6];
@@ -46,7 +46,9 @@ struct Inp {
   bool state, last;
   unsigned long t;
 };
-
+//===================================
+// SETTING INITIAL VALUES
+//===================================
 Inp brake = {BRAKE_PIN,false,false,0};
 Inp leftI = {LEFT_PIN,false,false,0};
 Inp rightI= {RIGHT_PIN,false,false,0};
@@ -89,27 +91,6 @@ Ch font(char c){
     case ' ': return {{0,0,0}};
   }
   return {{0,0,0}};
-}
-
-// =========================
-// PIXEL DRAW (REAL HARDWARE MAPPING)
-// =========================
-void drawPixel(int x,int y,CRGB c){
-
-  if(y==0){ // top (9)
-    int i = x - offTop;
-    if(i>=0 && i<LEN9){ r9[i]=l9[i]=c; }
-  }
-
-  if(y==1){ // mid (8)
-    int i = x - offMid;
-    if(i>=0 && i<LEN8){ r8[i]=l8[i]=c; }
-  }
-
-  if(y==2){ // bottom (6)
-    int i = x - offBot;
-    if(i>=0 && i<LEN6){ r6[i]=l6[i]=c; }
-  }
 }
 
 // =========================================================================
@@ -228,6 +209,9 @@ void turn(bool leftSide,uint8_t step){
 }
 
 // A 3x18 lookup table stored safely in Flash memory (PROGMEM)
+// in stead of difficult calculations because of the numbering from right to left is up-down
+// we handle the 6 led-strips as one 3x18 display and do a translation via this lookup table
+// to see which led has to be activated. This is only for the startup animation.
 const int8_t PROGMEM layoutMap[3][18] = {
   //  0   1   2   3   4   5   6   7   8  |  9  10  11  12  13  14  15  16  17   <- Virtual X
   {   0,  1,  2,  3,  4,  5,  6,  7,  8,    8,  7,  6,  5,  4,  3,  2,  1,  0 }, // Row 0 (Top)
@@ -319,7 +303,7 @@ void loop(){
   updateInput(rightI);
 
   bool isBraking=brake.state;
-  // bool isHazard = isLeftActive && isRightActive
+  // bool isHazard = isLeftActive && isRightActive // disabled this because of hazards shadowing over brakelight
   bool isLeftOn = leftI.state; // && !isHazard;
   bool isRightOn = rightI.state; // && !isHazard;
 
