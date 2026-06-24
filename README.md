@@ -1,5 +1,5 @@
 # topcase_E470_leds_v2
-Made some additional changes. Added a FAT NINJA (compressed 5x3) scrolling animation as startup sequence with an additional double flash at the end.
+Made some additional changes. Added a FAT NINJA (compressed 4x3) scrolling animation as startup sequence with an additional double flash at the end.
 At first was trying to recalculate which LEDs had to be activated to display the message. But ran into problems that I could only get it to work when I mirrored the right side. So left you could see the text scrolling normally and right side mirrored.
 Now treating the 6 LED-strips as one 3x18 display with a translation table, during the animation it will look the number in the table if it sees a '-1' value it discards the number and moves on.
 This resulted that I now have a text scrolling from Right to Left over the complete width of the topcase.
