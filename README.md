@@ -45,38 +45,38 @@ Ch font(char c){
 ```
 F
 111
-1xx
-1xx
+1
+1
 
 A
-x1x
+ 1 
 111
-1x1
+1 1
 
 T
 111
-x1x
-x1x
+ 1
+ 1
 
 N
-1x1
+1 1
 111
-1x1
+1 1
 
 I
-x1x
-x1x
-x1x
+ 1
+ 1
+ 1
 
 J
-xx1
-xx1
+  1
+  1
 111
 
 space
-xxx
-xxx
-xxx
+---
+---
+---
 
 between each character there will be 1 frame clearance
 ```
