@@ -6,11 +6,20 @@ This resulted that I now have a text scrolling from Right to Left over the compl
 Removed some obsolete code and added some additional comments to clarify what is happening.
 As I am receiving a pulsing input for the turn signals and not the state of the turn signal switch I am using a hold routine to keep the turn status active. As also the turnsignal can be inconsistent I am actually measuring the on/off time to adjust the hold timer when needed so the turn signal is synced to the bike's flash pattern.
 State as of now
-Running lights when inputs are no active (at about 80 of 255 brightness).
-Turn Signals synced with bike, turn signal side will show a comet pattern from inside to outside and other side will show running light state ( turn signal at 200 of 255 brightness). 
-Brake Signal, both sides will be fully lit (at about 200 of 255 brightness).
-Brake and Turn active, turning side will show the comet sweep other side will be fully lit (both turn and brake are at 200 of 255 brightness).
-Hazards (both sides will show comet sweep at 200 of 255 brightness).
-Hazards plus brake active, hazards will override brake, only bike's brakelight will show brake active. LEDs in topcase will continue with comet sweep at 200 of 255 brightness.
+- Running lights when inputs are no active (at about 80 of 255 brightness).
+- Turn Signals synced with bike, turn signal side will show a comet pattern from inside to outside and other side will show running light state ( turn signal at 200 of 255 brightness). 
+- Brake Signal, both sides will be fully lit (at about 200 of 255 brightness).
+- Brake and Turn active, turning side will show the comet sweep other side will be fully lit (both turn and brake are at 200 of 255 brightness).
+- Hazards (both sides will show comet sweep at 200 of 255 brightness).
+- Hazards plus brake active, hazards will override brake, only bike's brakelight will show brake active. LEDs in topcase will continue with comet sweep at 200 of 255 brightness.
 
-Have an idea to change the Hazards + Brake but have not tried it out yet. In my code there is some commented out code, when uncommented it will shadow the hazards over the brakelight but you only more or less see the dimmes tail of the comet sweeping.
+`[0.00s] ──────────────────────────► Key Turned ON
+ │
+ ├── 0,000ms to 3,240ms: "FAT NINJA" scrolls smoothly across the display (54 frames)
+ │
+ ├── 3,240ms to 3,360ms: Flash 1 (120ms burst)
+ │
+ ├── 3,360ms to 3,480ms: Flash 2 (120ms burst)
+ │
+[3.48s] ──────────────────────────► Ready to Ride
+`
