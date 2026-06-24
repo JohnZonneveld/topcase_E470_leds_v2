@@ -13,7 +13,9 @@ State as of now
 - Hazards (both sides will show comet sweep at 200 of 255 brightness).
 - Hazards plus brake active, hazards will override brake, only bike's brakelight will show brake active. LEDs in topcase will continue with comet sweep at 200 of 255 brightness.
 
-```[0.00s] ──────────────────────────► Key Turned ON
+```
+Startup animation
+[0.00s] ──────────────────────────► Key Turned ON
 │
 ├── 0,000ms to 3,240ms: "FAT NINJA" scrolls smoothly across the display (54 frames)
 │
@@ -21,5 +23,6 @@ State as of now
 │
 ├── 3,360ms to 3,480ms: Flash 2 (120ms burst)
 │
-[3.48s] ──────────────────────────► Ready to Ride```
+[3.48s] ──────────────────────────► Ready to Ride
+```
 
