@@ -296,144 +296,146 @@ void startupAnim(){
 // =========================
 // LOOP
 // =========================
-void loop(){
-
+void loop() {
+  // 1. REFRESH DEBOUNCED INPUT STRUCTURES
   updateInput(brake);
   updateInput(leftI);
   updateInput(rightI);
 
-  bool isBraking=brake.state;
-  // bool isHazard = isLeftActive && isRightActive // disabled this because of hazards shadowing over brakelight
-  bool isLeftOn = leftI.state; // && !isHazard;
-  bool isRightOn = rightI.state; // && !isHazard;
+  unsigned long now = millis();
 
-  unsigned long now=millis();
+  // Track the physical pulses for coincidence hazard detection
+  static unsigned long lastLeftRiseTime = 0;
+  static unsigned long lastRightRiseTime = 0;
 
-  // Left Signal Edge Detection & Dynamic Sync
-  if(isLeftOn && !prevL){
-    if (leftRise != 0) { 
-      unsigned long calc = now - leftRise;
-      // Sanity check: normal motorcycle flashers run between 50Hz and 120Hz 
-      // (approx 500ms to 1200ms per full cycle)
-      if (calc > 400 && calc < 1200) {
-        leftCycle = calc; 
-      }
-    }
-    leftRise = now;
-    leftStep = 0;
-    
-    // Set hold time to 1.3x the actual measured cycle.
-    // This guarantees it covers the "off" phase, but times out quickly when canceled.
-    leftHold = now + ((leftCycle * 13) / 10); 
+  // =========================================================================
+  // 2. INVERTED PHASE EDGE DETECTION & STATE LATCHING
+  // =========================================================================
+  static bool leftLatch = false;
+  static bool rightLatch = false;
+
+  // LEFT SIDE: Reset to 0 on the FALLING edge (wire drops low) to fix phase offset
+  if (!leftI.state && leftI.last) {
+    lastLeftRiseTime = now;
+    leftStep = 0; // Force sync to match the physical bulb rhythm
+  }
+  if (leftI.state) {
+    leftLatch = true;
+    leftHold = now + 950; // Keeps running through the dark cycle smoothly
+  }
+  if (now > leftHold) {
+    leftLatch = false;
   }
 
-  // Right Signal Edge Detection & Dynamic Sync
-  if(isRightOn && !prevR){
-    if (rightRise != 0) {
-      unsigned long calc = now - rightRise;
-      if (calc > 400 && calc < 1200) {
-        rightCycle = calc;
-      }
-    }
-    rightRise = now;
-    rightStep = 0;
-    rightHold = now + ((rightCycle * 13) / 10);
+  // RIGHT SIDE: Reset to 0 on the FALLING edge (wire drops low) to fix phase offset
+  if (!rightI.state && rightI.last) {
+    lastRightRiseTime = now;
+    rightStep = 0; // Force sync to match the physical bulb rhythm
+  }
+  if (rightI.state) {
+    rightLatch = true;
+    rightHold = now + 950;
+  }
+  if (now > rightHold) {
+    rightLatch = false;
   }
 
-  prevL = isLeftOn;
-  prevR = isRightOn;
-
-  // Active check: Stay in turn mode if the physical pin is HIGH, 
-  // OR if we are currently riding out the dark gap calculated above.
-  bool isLeftActive = isLeftOn || (now < leftHold);
-  bool isRightActive = isRightOn || (now < rightHold);
-  bool isHazard = isLeftActive && isRightActive;
-
-  if(now-lastAnim > max(20UL,min(leftCycle,rightCycle)/10)){
-    lastAnim=now;
-    if(isLeftActive) leftStep++;
-    if(isRightActive) rightStep++;
+  // Evaluate Hazard state based on the calculated timestamps
+  bool isHazard = false;
+  if ((now - lastLeftRiseTime < 850) && (now - lastRightRiseTime < 850)) {
+    isHazard = true;
   }
 
-  clearAll();
+  // =========================================================================
+  // 3. MASTER SAFETY INTERLOCK (TOTAL BRAKE LOCKOUT)
+  // =========================================================================
+  bool leftSideShouldBrake  = brake.state;
+  bool rightSideShouldBrake = brake.state;
 
-  // RUNNING
-  if(!isBraking){
-    if(!isHazard){
-      if(!isLeftActive) runLight(true);
-      if(!isRightActive) runLight(false);
-    }
+  if (isHazard) {
+    leftSideShouldBrake  = false;
+    rightSideShouldBrake = false;
+  } else {
+    if (leftLatch)  leftSideShouldBrake  = false; // Left signaling? Strip brake input.
+    if (rightLatch) rightSideShouldBrake = false; // Right signaling? Strip brake input.
   }
+
+  // =========================================================================
+  // 4. RENDERING ENGINE
+  // =========================================================================
+  clearAll(); // Wipe canvas clean before mapping this frame
 
   // -------------------------------------------------------------------------
   // LEFT SIDE TAILLIGHT
   // -------------------------------------------------------------------------
-  if (isHazard || isLeftActive) {
-    // 1. Establish the background layer first
-    if (isBraking) {
+  if (isHazard || leftLatch) {
+    if (leftSideShouldBrake) {
       fill_solid(l9, LEN9, CRGB(255, 0, 0));
       fill_solid(l8, LEN8, CRGB(255, 0, 0));
       fill_solid(l6, LEN6, CRGB(255, 0, 0));
-    } else {
-      fill_solid(l9, LEN9, CRGB(60, 0, 0));
-      fill_solid(l8, LEN8, CRGB(60, 0, 0));
-      fill_solid(l6, LEN6, CRGB(60, 0, 0));
     }
-    
-    // 2. Layer the inside-out comet right on top
-    // (If hazards are on, use leftStep or rightStep depending on how your sync matches)
-    uint8_t step = leftStep; 
-    comet(l9, LEN9, step);
-    comet(l8, LEN8, step);
-    comet(l6, LEN6, step);
+    comet(l9, LEN9, leftStep);
+    comet(l8, LEN8, leftStep);
+    comet(l6, LEN6, leftStep);
   } 
-  else if (isBraking) {
-    // No left signals active, but brake is held down
+  else if (leftSideShouldBrake) {
     fill_solid(l9, LEN9, CRGB(255, 0, 0));
     fill_solid(l8, LEN8, CRGB(255, 0, 0));
     fill_solid(l6, LEN6, CRGB(255, 0, 0));
   } 
   else {
-    // Default left running lights
-    fill_solid(l9, LEN9, CRGB(60, 0, 0));
-    fill_solid(l8, LEN8, CRGB(60, 0, 0));
-    fill_solid(l6, LEN6, CRGB(60, 0, 0));
+    // Cruising state -> Outer contour accents only
+    for(int i = 0; i < 4; i++) l9[i] = CRGB(60, 0, 0);
+    for(int i = 0; i < 3; i++) l8[i] = CRGB(60, 0, 0);
+    l6[0] = CRGB(60, 0, 0);
   }
 
   // -------------------------------------------------------------------------
   // RIGHT SIDE TAILLIGHT
   // -------------------------------------------------------------------------
-  if (isHazard || isRightActive) {
-    // 1. Establish the background layer first
-    if (isBraking) {
+  if (isHazard || rightLatch) {
+    if (rightSideShouldBrake) {
       fill_solid(r9, LEN9, CRGB(255, 0, 0));
       fill_solid(r8, LEN8, CRGB(255, 0, 0));
       fill_solid(r6, LEN6, CRGB(255, 0, 0));
-    } else {
-      fill_solid(r9, LEN9, CRGB(60, 0, 0));
-      fill_solid(r8, LEN8, CRGB(60, 0, 0));
-      fill_solid(r6, LEN6, CRGB(60, 0, 0));
     }
-    
-    // 2. Layer the inside-out comet right on top
-    uint8_t step = rightStep;
-    comet(r9, LEN9, step);
-    comet(r8, LEN8, step);
-    comet(r6, LEN6, step);
+    comet(r9, LEN9, rightStep);
+    comet(r8, LEN8, rightStep);
+    comet(r6, LEN6, rightStep);
   } 
-  else if (isBraking) {
-    // No right signals active, but brake is held down
+  else if (rightSideShouldBrake) {
     fill_solid(r9, LEN9, CRGB(255, 0, 0));
     fill_solid(r8, LEN8, CRGB(255, 0, 0));
     fill_solid(r6, LEN6, CRGB(255, 0, 0));
   } 
   else {
-    // Default right running lights
-    fill_solid(r9, LEN9, CRGB(60, 0, 0));
-    fill_solid(r8, LEN8, CRGB(60, 0, 0));
-    fill_solid(r6, LEN6, CRGB(60, 0, 0));
+    for(int i = 0; i < 4; i++) r9[i] = CRGB(60, 0, 0);
+    for(int i = 0; i < 3; i++) r8[i] = CRGB(60, 0, 0);
+    r6[0] = CRGB(60, 0, 0);
   }
 
-  // Final step: Push the cleanly blended pixels to the topcase hardware
+  // =========================================================================
+  // 5. ANIMATION TIMING ENGINE
+  // =========================================================================
+  static unsigned long lastStepTime = 0;
+  
+  // Tweak the 40ms frame delay lower if you want a faster, snappier sweep
+  if (now - lastStepTime >= 40) {
+    lastStepTime = now;
+
+    if (leftLatch || isHazard) {
+      if (leftStep < 12) leftStep++; 
+    } else {
+      leftStep = 0;
+    }
+
+    if (rightLatch || isHazard) {
+      if (rightStep < 12) rightStep++;
+    } else {
+      rightStep = 0;
+    }
+  }
+
+  // 6. TRANSMIT DATA GENERATION OUT TO THE PHYSICAL STRIPS
   FastLED.show();
 }
