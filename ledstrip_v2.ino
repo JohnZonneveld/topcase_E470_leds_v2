@@ -207,20 +207,29 @@ void startupAnim(){
   const char* msg = " FAT NINJA ";
   int len = strlen(msg);
 
-  // Smooth right-to-left marquee scan across the full 18-column virtual grid
-  for(int scan = 20; scan > -len * 4; scan--){
+  // We have 3 spaces in the message. If each space shrinks by 1 step,
+  // the total width of the text shrinks by 3 steps.
+  int totalTextWidth = (len * 4) - 3; 
+
+  for(int scan = 20; scan > -totalTextWidth; scan--){
     clearAll();
 
+    int spacesEncountered = 0;
+
     for(int i = 0; i < len; i++){
+      // Count how many spaces have passed so we can shift subsequent letters left
+      if (msg[i] == ' ') {
+        spacesEncountered++;
+      }
+
       Ch c = font(msg[i]);
 
       for(int col = 0; col < 3; col++){
-        int x = scan + i * 4 + col;
+        // Core Math: Every space character shrinks its slot by 1 pixel step
+        int x = scan + (i * 4) - spacesEncountered + col;
 
         for(int row = 0; row < 3; row++){
-          // Read font columns naturally from left to right
           if(c.r[row] & (1 << (2 - col))){
-            // Pass coordinates straight to our mapping engine
             setMatrixPixel(x, row, CRGB(180, 0, 0));
           }
         }
