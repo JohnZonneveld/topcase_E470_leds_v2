@@ -26,3 +26,57 @@ Startup animation
 [3.48s] ──────────────────────────► Ready to Ride
 ```
 
+```
+Scroll text, letter definition
+Ch font(char c){
+  switch(c){
+    case 'F': return {{0b111,0b100,0b100}};
+    case 'A': return {{0b010,0b111,0b101}};
+    case 'T': return {{0b111,0b010,0b010}};
+    case 'N': return {{0b101,0b111,0b101}};
+    case 'I': return {{0b010,0b010,0b010}};
+    case 'J': return {{0b001,0b001,0b111}};
+    case ' ': return {{0,0,0}};
+  }
+  return {{0,0,0}};
+}
+```
+
+```
+F
+111
+1xx
+1xx
+
+A
+x1x
+111
+1x1
+
+T
+111
+x1x
+x1x
+
+N
+1x1
+111
+1x1
+
+I
+x1x
+x1x
+x1x
+
+J
+xx1
+xx1
+111
+
+space
+xxx
+xxx
+xxx
+
+between each character there will be 1 frame clearance
+```
