@@ -1,7 +1,7 @@
 #include <FastLED.h>
 
 // =========================
-// LED CONFIG
+// LED STRIP CONFIG
 // =========================
 #define LED_TYPE WS2812B
 #define COLOR_ORDER GRB
@@ -21,6 +21,7 @@
 #define RIGHT_PIN 9
 #define LEFT_PIN 10
 
+// Define LED strip lengths
 #define LEN9 9
 #define LEN8 8
 #define LEN6 6
@@ -66,14 +67,6 @@ bool prevL=false, prevR=false;
 
 uint8_t leftStep=0, rightStep=0;
 unsigned long lastAnim=0;
-
-// =========================
-// ROW ALIGNMENT OFFSETS
-// (THIS FIXES YOUR PHYSICAL SHIFT)
-// =========================
-int offTop = -3;   // 9 LED row
-int offMid = -2;   // 8 LED row
-int offBot =  0;   // 6 LED row
 
 // =========================
 // FONT (3x5 compressed)
@@ -137,9 +130,9 @@ void setup(){
   FastLED.show();
 }
 
-// =========================
-// CLEAR
-// =========================
+// ===========================
+// CLEAR ALL LEDs (set black)
+// ===========================
 void clearAll(){
   fill_solid(r9,LEN9,CRGB::Black);
   fill_solid(r8,LEN8,CRGB::Black);
@@ -150,35 +143,8 @@ void clearAll(){
 }
 
 // =========================
-// TURN / BRAKE
+// TURN / BRAKE / RUN
 // =========================
-void runLight(bool left){
-  CRGB c = CRGB(RUN_BRIGHT,0,0);
-
-  if(left){
-    l6[0]=c;
-    for(int i=0;i<3;i++) l8[i]=c;
-    for(int i=0;i<4;i++) l9[i]=c;
-  } else {
-    r6[0]=c;
-    for(int i=0;i<3;i++) r8[i]=c;
-    for(int i=0;i<4;i++) r9[i]=c;
-  }
-}
-
-void brakeLight(bool left){
-  CRGB c = CRGB(BRAKE_BRIGHT,0,0);
-
-  if(left){
-    fill_solid(l6,LEN6,c);
-    fill_solid(l8,LEN8,c);
-    fill_solid(l9,LEN9,c);
-  } else {
-    fill_solid(r6,LEN6,c);
-    fill_solid(r8,LEN8,c);
-    fill_solid(r9,LEN9,c);
-  }
-}
 
 void comet(CRGB* s, int len, int pos){
   // i = 0 is the leading head, i = 1, 2, 3 are the trailing dim pixels
@@ -190,21 +156,10 @@ void comet(CRGB* s, int len, int pos){
     
     // Strict boundary safety check
     if(p >= 0 && p < len) {
-      // Vivid automotive amber
+      // Set brightness of comet LEDs, as our comet has 4 LEDs
+      // brightness is 200/(0+1) = 200, 200/(1+1) = 100, 200/(2+1) = 66 and 200/(3+1) = 50
       s[p] = CRGB(200 / (i + 1), 0 , 0); 
     }
-  }
-}
-
-void turn(bool leftSide,uint8_t step){
-  if(leftSide){
-    comet(l6,LEN6,step);
-    comet(l8,LEN8,step);
-    comet(l9,LEN9,step);
-  } else {
-    comet(r6,LEN6,step);
-    comet(r8,LEN8,step);
-    comet(r9,LEN9,step);
   }
 }
 
@@ -223,16 +178,16 @@ const int8_t PROGMEM layoutMap[3][18] = {
 // UNIFIED GRAPHICS MAPPING ENGINE (MANAGES HARDWARE LAYOUT)
 // =========================================================================
 void setMatrixPixel(int x, int row, CRGB color) {
-  // 1. Safety boundary check
+  // Safety boundary check, if any x or row value is bigger than what we have --> stop executing
   if (x < 0 || x > 17 || row < 0 || row > 2) return;
 
-  // 2. Read the physical index from the flash memory table
+  // Read the physical index from the flash memory table
   int8_t physicalIdx = pgm_read_byte(&(layoutMap[row][x]));
 
-  // 3. If it's a phantom/empty slot (-1), discard it immediately!
+  // If it's a phantom/empty slot (-1), discard it immediately!
   if (physicalIdx == -1) return;
 
-  // 4. Send the color to the correct strip array based on left/right hemisphere
+  // Send the color to the correct strip array based on left/right hemisphere
   if (x <= 8) {
     if (row == 0)      l9[physicalIdx] = color;
     else if (row == 1) l8[physicalIdx] = color;
@@ -246,7 +201,7 @@ void setMatrixPixel(int x, int row, CRGB color) {
 }
 
 // =========================================================================
-// STARTUP ANIMATION (FLAWLESS UNIFIED HORIZONTAL MARXCH)
+// STARTUP ANIMATION (ANIMATED TEXT)
 // =========================================================================
 void startupAnim(){
   const char* msg = " FAT NINJA ";
@@ -273,7 +228,14 @@ void startupAnim(){
     }
 
     FastLED.show();
-    delay(60);
+    // as it is the startup animation we can use a delay to 'slow' down the scroll
+    // we have 9 characters including 1 space and one empty space between characters
+    // so in total 9 x 4 steps = 36 steps to display the text. We only have 18 LEDs
+    // Text will fill the display in 18 steps and the last character will clear after
+    // and addtional 36 steps (text length), in total 54 steps. As shown below delay is 60ms
+    // thus the scrolling text will be finished after 54 x 60 = 3240msec.
+    // With the additional brake flashes the whole startup lasts under 3.5 sec.
+    delay(60); 
   }
 
   // Ignition flashes rewritten to use the discrete hardware strips
@@ -297,7 +259,7 @@ void startupAnim(){
 // LOOP
 // =========================
 void loop() {
-  // 1. REFRESH DEBOUNCED INPUT STRUCTURES
+  // REFRESH DEBOUNCED INPUT STRUCTURES
   updateInput(brake);
   updateInput(leftI);
   updateInput(rightI);
@@ -308,9 +270,9 @@ void loop() {
   static unsigned long lastLeftRiseTime = 0;
   static unsigned long lastRightRiseTime = 0;
 
-  // =========================================================================
-  // 2. INVERTED PHASE EDGE DETECTION & STATE LATCHING
-  // =========================================================================
+  // ====================================================================================
+  // INVERTED PHASE EDGE DETECTION & STATE LATCHING, TO GET LEDs COMET IN SYNC WITH BIKE
+  // ====================================================================================
   static bool leftLatch = false;
   static bool rightLatch = false;
 
@@ -347,7 +309,7 @@ void loop() {
   }
 
   // =========================================================================
-  // 3. MASTER SAFETY INTERLOCK (TOTAL BRAKE LOCKOUT)
+  // MASTER SAFETY INTERLOCK (TOTAL BRAKE LOCKOUT)
   // =========================================================================
   bool leftSideShouldBrake  = brake.state;
   bool rightSideShouldBrake = brake.state;
@@ -361,7 +323,7 @@ void loop() {
   }
 
   // =========================================================================
-  // 4. RENDERING ENGINE
+  // RENDERING ENGINE
   // =========================================================================
   clearAll(); // Wipe canvas clean before mapping this frame
 
@@ -415,7 +377,7 @@ void loop() {
   }
 
   // =========================================================================
-  // 5. ANIMATION TIMING ENGINE
+  // ANIMATION TIMING ENGINE
   // =========================================================================
   static unsigned long lastStepTime = 0;
   
@@ -436,6 +398,6 @@ void loop() {
     }
   }
 
-  // 6. TRANSMIT DATA GENERATION OUT TO THE PHYSICAL STRIPS
+  // TRANSMIT DATA GENERATION OUT TO THE PHYSICAL STRIPS
   FastLED.show();
 }
