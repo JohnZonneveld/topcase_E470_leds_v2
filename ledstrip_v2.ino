@@ -150,7 +150,7 @@ void clearAll(){
 
 void comet(CRGB* s, int len, int pos){
   // i = 0 is the leading head, i = 1, 2, 3 are the trailing dim pixels
-  for(int i = 0; i <  cometLength; i++){
+  for(int i = 0; i < cometLength; i++){
     
     // Core Math: Starts at the center line (len - 1) and counts outward as pos increases.
     // Adding '+ i' ensures the dim tail pixels trail behind toward the center line.
@@ -391,7 +391,9 @@ void loop() {
   // ANIMATION TIMING ENGINE
   // =========================================================================
   static unsigned long lastStepTime = 0;
-  int maxSteps = 9 + cometLength -1;
+
+  int maxSteps = 8 + cometLength
+  
   // Tweak the 40ms frame delay lower if you want a faster, snappier sweep
   if (now - lastStepTime >= 40) {
     lastStepTime = now;
