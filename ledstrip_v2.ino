@@ -392,7 +392,7 @@ void loop() {
   // =========================================================================
   static unsigned long lastStepTime = 0;
 
-  int maxSteps = 8 + cometLength
+  int maxSteps = 8 + cometLength;
   
   // Tweak the 40ms frame delay lower if you want a faster, snappier sweep
   if (now - lastStepTime >= 40) {
